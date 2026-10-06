@@ -5,6 +5,7 @@ import {
   collectKnowledge,
   collectSnapshot,
   collectTaskBoard,
+  COMMAND_TIMEOUT_MS,
   buildOfficeSnapshot,
   buildOfficeSummary,
   parseChannelStatus,
@@ -36,6 +37,10 @@ describe('Hermes output parsers', () => {
     const snapshot = await collectSnapshot(async () => { throw new Error('not found') })
     expect(snapshot.profiles).toMatchObject({ availability: 'unavailable', data: [], error: { code: 'COMMAND_FAILED' } })
     expect(snapshot.openCode.data).toBe('Unknown')
+  })
+
+  it('sets a sixty-second timeout for all read commands', () => {
+    expect(COMMAND_TIMEOUT_MS).toBe(60_000)
   })
 
   it('treats unrecognized profile output as unavailable', async () => {

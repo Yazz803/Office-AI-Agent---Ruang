@@ -26,8 +26,9 @@ Profile lock (optional, set it in Settings):
   ruang profile-lock status  Show which agents are locked with the PIN
   ruang profile-lock off     Remove the PIN and unlock every agent (use this if the PIN is lost)
 
-The server listens on 127.0.0.1 only. Open http://127.0.0.1:<port> in a browser;
-on a remote machine, forward the port: ssh -L 3001:127.0.0.1:3001 user@host`
+The server listens on 0.0.0.0 (all network interfaces). Open http://127.0.0.1:<port>
+on this machine, or use the machine's reachable IP from another device. Expose it
+only on a trusted network; use HTTPS through a reverse proxy or tunnel for remote access.`
 
 async function accessCode(action) {
   const module = new URL('../build/server/access.js', import.meta.url)

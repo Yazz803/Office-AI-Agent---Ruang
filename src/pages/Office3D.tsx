@@ -8,11 +8,62 @@ import { clampTarget, createLayout, FLOOR_HEIGHT, floorOf, GAME_ROOM, idlePlan, 
 import { Environment } from '../scene3d/environment.tsx'
 import { RBox, WorkDesk } from '../scene3d/props.tsx'
 import type { OfficeStation } from '../types.ts'
+import { useAgentNicknames } from '../agent-nicknames.ts'
+import { useAgentCharacterModel } from '../character-models.ts'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { characterPose } from '../character-pose.ts'
 
 // 3D view of the same Office snapshot the 2D view renders. Positions come from each station's
 // room, roomPosition and seat, so the 3D office shows exactly the states the server derived.
 
 type Registry<T> = MutableRefObject<Map<string, T>>
+
+const loadedCharacterModels = new Map<string, Promise<THREE.Group>>()
+
+function loadCharacterModel(url: string): Promise<THREE.Group> {
+  const cached = loadedCharacterModels.get(url)
+  if (cached) return cached
+  const pending = new Promise<THREE.Group>((resolve, reject) => {
+    new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject)
+  }).catch((error: unknown) => {
+    loadedCharacterModels.delete(url)
+    throw error
+  })
+  loadedCharacterModels.set(url, pending)
+  return pending
+}
+
+function useCharacterModel(url: string | undefined): THREE.Group | undefined {
+  const [scene, setScene] = useState<THREE.Group | undefined>()
+  useEffect(() => {
+    if (!url) { setScene(undefined); return }
+    let active = true
+    setScene(undefined)
+    void loadCharacterModel(url).then((source) => { if (active) setScene(source) }).catch(() => { if (active) setScene(undefined) })
+    return () => { active = false }
+  }, [url])
+  return scene
+}
+
+function LoadedCharacter({ source }: { source: THREE.Group }) {
+  const group = useMemo(() => {
+    if (!source) return undefined
+    const scene = source.clone(true)
+    const bounds = new THREE.Box3().setFromObject(scene)
+    const size = bounds.getSize(new THREE.Vector3())
+    const height = Math.max(size.y, size.x, size.z)
+    if (height > 0) scene.scale.multiplyScalar(1.62 / height)
+    const normalizedBounds = new THREE.Box3().setFromObject(scene)
+    const center = normalizedBounds.getCenter(new THREE.Vector3())
+    scene.position.x -= center.x
+    scene.position.z -= center.z
+    scene.position.y -= normalizedBounds.min.y
+    const wrapper = new THREE.Group()
+    wrapper.add(scene)
+    return wrapper
+  }, [source])
+  return group ? <primitive object={group} dispose={null}/> : null
+}
 
 /** Ground-floor spots outside the building (gang, sidewalk, yard) stay in view from lantai 2. */
 function outdoors(x: number, z: number, layout: OfficeLayout): boolean {
@@ -24,11 +75,14 @@ function outdoors(x: number, z: number, layout: OfficeLayout): boolean {
 function Character({ station, placement, layout, floor, onSelect, anchor }: { station: OfficeStation; placement: Placement; layout: OfficeLayout; floor: Floor; onSelect: (station: OfficeStation, trigger: HTMLElement | null) => void; anchor: (object: THREE.Object3D | null) => void }) {
   const root = useRef<THREE.Group>(null)
   const body = useRef<THREE.Group>(null)
+  const poseBody = useRef<THREE.Group>(null)
   const leftLeg = useRef<THREE.Mesh>(null)
   const rightLeg = useRef<THREE.Mesh>(null)
   const leftArm = useRef<THREE.Mesh>(null)
   const rightArm = useRef<THREE.Mesh>(null)
   const colors = agentLook(station.id)
+  const [model] = useAgentCharacterModel(station.id)
+  const loadedModel = useCharacterModel(model?.modelUrl)
   const offline = station.state === 'Offline'
   const unknown = station.state === 'Unknown'
   const tint = (color: string) => offline ? '#7b7f7d' : color
@@ -85,17 +139,20 @@ function Character({ station, placement, layout, floor, onSelect, anchor }: { st
       leftArm.current.rotation.x = lying ? 0 : walking ? -swing : typing ? -1.1 + Math.sin(time * 14) * 0.12 : talking ? -0.4 + Math.sin(time * 3) * 0.3 : 0
       rightArm.current.rotation.x = lying ? 0 : walking ? swing : typing ? -1.1 + Math.cos(time * 14) * 0.12 : 0
     }
-    if (body.current) {
-      // Lying down: the body tips back so the head rests towards the pillow (local -z).
-      body.current.rotation.x += ((lying ? -Math.PI / 2 : 0) - body.current.rotation.x) * 0.2
+    if (poseBody.current) {
+      // Keep body poses local so a selected GLB never moves the agent's walking/click root.
       const talk = station.state === 'Collaborating' && !walking ? Math.abs(Math.sin(time * 5)) * 0.03 : 0
       const breathe = station.state === 'Idle' ? Math.sin(time * (lying ? 1.2 : 2)) * 0.015 : 0
-      body.current.position.y = lying ? (placement.height ?? 0.5) + 0.16 + breathe : (onFloor ? -0.5 : seated ? -0.14 : 0) + talk + breathe
+      const pose = characterPose({ lying, onFloor, seated, height: placement.height, talk, breathe })
+      poseBody.current.rotation.x += (pose.rotationX - poseBody.current.rotation.x) * 0.2
+      poseBody.current.position.y = pose.positionY
     }
   })
 
   return <group ref={root} position={start}>
     <group ref={body} onClick={(event) => { event.stopPropagation(); onSelect(station, null) }} onPointerOver={() => { document.body.style.cursor = 'pointer' }} onPointerOut={() => { document.body.style.cursor = '' }}>
+      <group ref={poseBody}>
+      {loadedModel && model ? <LoadedCharacter source={loadedModel}/> : <>
       <mesh ref={leftLeg} position={[-0.11, 0.66, 0]} castShadow geometry={legGeometry}><meshStandardMaterial color={tint(colors.pants)} roughness={0.8}/></mesh>
       <mesh ref={rightLeg} position={[0.11, 0.66, 0]} castShadow geometry={legGeometry}><meshStandardMaterial color={tint(colors.pants)} roughness={0.8}/></mesh>
       <RBox position={[0, 0.98, 0]} size={[0.48, 0.58, 0.3]} radius={0.07} color={tint(colors.shirt)} roughness={0.85}/>
@@ -108,6 +165,8 @@ function Character({ station, placement, layout, floor, onSelect, anchor }: { st
       <RBox position={[0.09, 1.52, 0.186]} size={[0.06, 0.07, 0.01]} radius={0.004} color="#17201e" shadow={false}/>
       <RBox position={[0, 1.4, 0.186]} size={[0.12, 0.025, 0.01]} radius={0.004} color="#9a5a44" shadow={false}/>
       {unknown && <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.45, 0.55, 24]}/><meshBasicMaterial color="#e9c47b" transparent opacity={0.85}/></mesh>}
+      </>}
+      </group>
       <object3D ref={anchor} position={[0, 2.05, 0]}/>
     </group>
   </group>
@@ -295,6 +354,7 @@ function useFloor(): [Floor, (floor: Floor) => void] {
 }
 
 export default function Office3D({ stations, onSelect }: { stations: OfficeStation[]; onSelect: (station: OfficeStation, trigger: HTMLElement | null) => void }) {
+  const nicknames = useAgentNicknames()
   const anchors = useRef(new Map<string, THREE.Object3D>())
   const labels = useRef(new Map<string, HTMLElement>())
   const view = useRef<ViewHandle>(null)
@@ -333,10 +393,11 @@ export default function Office3D({ stations, onSelect }: { stations: OfficeStati
         const badge = officeStateBadge(station.state)
         const busy = ['Working', 'Reviewing', 'Collaborating'].includes(station.state)
         const idle = wandering(station)
-        return <button key={station.id} ref={register(labels, `agent-${station.id}`)} type="button" className={`agent-tag-3d state-${station.state.toLowerCase()}`} onClick={(event) => onSelect(station, event.currentTarget)} aria-label={`${station.name}. ${station.state}.${station.activity ? ` ${station.activity}.` : ''}${idle ? ` ${idle.placement.label ?? idle.stop.label}.` : ''} Open station details.`}>
+        const displayName = nicknames[station.id] || station.name
+        return <button key={station.id} ref={register(labels, `agent-${station.id}`)} type="button" className={`agent-tag-3d state-${station.state.toLowerCase()}`} onClick={(event) => onSelect(station, event.currentTarget)} aria-label={`${displayName}. ${station.state}.${station.activity ? ` ${station.activity}.` : ''}${idle ? ` ${idle.placement.label ?? idle.stop.label}.` : ''} Open station details.`}>
           {busy && station.activity && <span className="speech speech-3d">{station.activity}</span>}
           {idle && <span className={`speech speech-3d speech-idle${idle.placement.pose === 'lie' ? ' speech-sleep' : ''}`}>{idle.placement.pose === 'lie' ? '💤 ' : ''}{idle.placement.label ?? idle.stop.label}</span>}
-          <span className="agent-tag-row"><span className="pixel-station-name">{station.privacy === 'locked' ? '🔒 ' : ''}{station.name}</span><span className={`badge ${badge.tone}`}>{station.state === 'Idle' ? 'Idle' : station.state}</span></span>
+          <span className="agent-tag-row"><span className="pixel-station-name">{station.privacy === 'locked' ? '🔒 ' : ''}{displayName}</span><span className={`badge ${badge.tone}`}>{station.state === 'Idle' ? 'Idle' : station.state}</span></span>
         </button>
       })}
     </div>

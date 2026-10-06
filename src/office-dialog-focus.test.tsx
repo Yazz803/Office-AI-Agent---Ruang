@@ -29,7 +29,8 @@ describe('Office detail dialog focus', () => {
     const close = document.querySelector<HTMLButtonElement>('.office-close')!
     const tabs = [...document.querySelectorAll<HTMLButtonElement>('.detail-tabs button')]
     expect(tabs.map((tab) => tab.textContent)).toEqual(['Overview', 'Folder', 'Memory'])
-    const last = tabs[tabs.length - 1]
+    const focusable = [...document.querySelectorAll<HTMLElement>('.office-detail button:not([disabled]), .office-detail select:not([disabled])')]
+    const last = focusable[focusable.length - 1]
     // Tab from the last control wraps to the first (Close); Shift+Tab from Close wraps back.
     last.focus()
     const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })

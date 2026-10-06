@@ -1,5 +1,6 @@
-import { Component, lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import { agentLook } from '../agents.ts'
+import { Component, lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { AgentCharacterAvatar } from '../AgentCharacterAvatar.tsx'
+export { PixelCharacter } from '../AgentCharacterAvatar.tsx'
 import { officeStateBadge } from '../office-state.ts'
 import { usePolling } from '../polling.ts'
 import { formatCompact, formatDateTime, formatNumber } from '../format.ts'
@@ -14,6 +15,8 @@ import { TaskBoard } from './TaskBoard.tsx'
 import { formatCost } from '../usage.ts'
 import { RelockBar } from '../ProfileLock.tsx'
 import { TokenUsage } from './TokenUsage.tsx'
+import { useAgentNicknames } from '../agent-nicknames.ts'
+import { CharacterModelSelector } from '../CharacterModelSelector.tsx'
 
 // The 3D view (three.js) is only downloaded when someone switches to it.
 const Office3D = lazy(() => import('./Office3D.tsx'))
@@ -50,13 +53,6 @@ class SceneBoundary extends Component<{ fallback: ReactNode; children: ReactNode
 }
 
 const ROOMS: OfficeRoom[] = ['Workspace', 'Lounge']
-
-/** A pixel character dressed in the colours derived from the agent id. */
-export function PixelCharacter({ agent }: { agent: string }) {
-  const look = agentLook(agent)
-  const style = { '--hair': look.hair, '--skin': look.skin, '--shirt': look.shirt, '--pants': look.pants } as CSSProperties
-  return <span className="pixel-character" style={style} aria-hidden="true"><span className="character-hair"/><span className="character-head"><i/><b/></span><span className="character-torso"/><span className="character-arm left"/><span className="character-arm right"/><span className="character-leg left"/><span className="character-leg right"/></span>
-}
 
 function officeStateLabel(station: OfficeStation): string {
   return station.state === 'Idle' ? 'Idle · managed placement' : station.state
@@ -98,12 +94,13 @@ export function OfficeDetail({ station, onClose }: { station: OfficeStation; onC
   return <div className="office-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className={`office-detail${tab === 'Overview' ? '' : ' wide'}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="office-detail-title" onKeyDown={onKeyDown}>
       <button className="office-close" ref={closeRef} onClick={onClose} aria-label={`Close ${station.name} details`}>Close</button>
-      <div className="detail-head"><div className="detail-avatar"><PixelCharacter agent={station.id}/></div><div><p className="eyebrow">STATION DETAIL</p><h2 id="office-detail-title">{station.name}</h2><span className={`badge ${badge.tone}`}>{officeStateLabel(station)}</span>{station.privacy === 'locked' && <span className="badge muted">🔒 Locked</span>}</div></div>
+      <div className="detail-head"><div className="detail-avatar"><AgentCharacterAvatar agent={station.id}/></div><div><p className="eyebrow">STATION DETAIL</p><h2 id="office-detail-title">{station.name}</h2><span className={`badge ${badge.tone}`}>{officeStateLabel(station)}</span>{station.privacy === 'locked' && <span className="badge muted">🔒 Locked</span>}</div></div>
       {profile && <div className="detail-tabs" role="tablist" aria-label={`${station.name} details`}>{DETAIL_TABS.map((item) => <button type="button" role="tab" key={item} aria-selected={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>}
       <div role="tabpanel" aria-label={tab} className="detail-body">
         {tab === 'Overview' && <>{station.privacy === 'locked' && <p className="file-notice">🔒 {station.name} is locked: its task, activity, memory and files are private. Open the Folder or Memory tab to enter the PIN.</p>}
           {station.privacy === 'unlocked' && <RelockBar agent={station.id} minutes={15}/>}
           {station.activity && <p className="detail-activity">{station.activity}</p>}
+          <CharacterModelSelector agentId={station.id}/>
           <dl className="office-detail-grid"><div><dt>Agent type</dt><dd>{station.role}</dd></div>{station.role !== 'OpenCode' && <AgentTokens agent={station.id}/>}<div><dt>Current room</dt><dd>{station.room} / {station.roomPosition}</dd></div><div><dt>Current task</dt><dd>{station.currentTask}</dd></div><div><dt>Recent activity</dt><dd>{station.recentActivity}</dd></div><div><dt>Source / provenance</dt><dd>{station.provenance}</dd></div><div><dt>Freshness</dt><dd>{station.freshness}</dd></div></dl></>}
         {tab === 'Folder' && profile && <AgentFolder profile={profile}/>}
         {tab === 'Memory' && profile && <AgentMemoryView profile={profile}/>}
@@ -158,7 +155,8 @@ export function Office({ dashboard, dashboardPending = false, onNavigate }: { da
   const office = snapshot.status === 'ready' ? snapshot.data : undefined
   const activity = activitySnapshot.status === 'ready' ? activitySnapshot.data : undefined
   const channels = channelsSnapshot.status === 'ready' ? channelsSnapshot.data : undefined
-  const [selectedName, setSelectedName] = useState<OfficeStation['name'] | undefined>()
+  const [selectedId, setSelectedId] = useState<OfficeStation['id'] | undefined>()
+  const nicknames = useAgentNicknames()
   const selectedTrigger = useRef<HTMLElement | null>(null)
   const [chosenRoom, setChosenRoom] = useState<OfficeRoom | undefined>()
   const [view, setView] = useState<OfficeView>(() => typeof window === 'undefined' ? '2d' : storedView())
@@ -174,24 +172,25 @@ export function Office({ dashboard, dashboardPending = false, onNavigate }: { da
     try { window.localStorage.setItem('mc.officeView', next) } catch { /* storage may be blocked */ }
   }
   const show3d = view === '3d' && webgl
-  const select3d = (station: OfficeStation, trigger: HTMLElement | null) => { selectedTrigger.current = trigger; setSelectedName(station.name) }
+  const select3d = (station: OfficeStation, trigger: HTMLElement | null) => { selectedTrigger.current = trigger; setSelectedId(station.id) }
   const counts = Object.fromEntries(ROOMS.map((item) => [item, office?.stations.filter((station) => station.room === item).length ?? 0])) as Record<OfficeRoom, number>
   // Until the viewer picks a room, open wherever the crew currently is.
   const room: OfficeRoom = chosenRoom ?? (counts.Workspace === 0 && counts.Lounge > 0 ? 'Lounge' : 'Workspace')
   const stations = office?.stations.filter((station) => station.room === room) ?? []
-  const selected = office?.stations.find((station) => station.name === selectedName)
+  const selected = office?.stations.find((station) => station.id === selectedId)
   const sessions = activity?.sessions
   const channelSource = channels?.channels
   const closeDetail = () => {
-    setSelectedName(undefined)
+    setSelectedId(undefined)
     selectedTrigger.current?.focus()
   }
   if (snapshot.status === 'pending') return <LoadingState message="Reading office state..."/>
   const hud = hudItems(office, dashboard)
   // Hot desking: one unlabeled desk per agent.
   const deskCount = office?.stations.length ?? 0
-  const stationButton2d = (station: OfficeStation) => { const badge = officeStateBadge(station.state); const busy = ['Working', 'Reviewing', 'Collaborating'].includes(station.state); return <button className={`pixel-station ${station.roomPosition} state-${station.state.toLowerCase()}`} key={station.id} onClick={(event) => { selectedTrigger.current = event.currentTarget; setSelectedName(station.name) }} aria-label={`${station.name}. ${officeStateLabel(station)}${station.activity ? `: ${station.activity}` : ''}. Open station details.`} title={station.activity || officeStateLabel(station)}>{busy && station.activity && <span className="speech" aria-hidden="true">{station.activity}</span>}<span className="pixel-station-name">{station.privacy === 'locked' ? '🔒 ' : ''}{station.name}</span><span className={`badge ${badge.tone}`}>{officeStateLabel(station)}</span>{station.state === 'Unknown' && <span className="neutral-label">NEUTRAL PRESENCE</span>}<PixelCharacter agent={station.id}/></button> }
-  const stationButton = (station: OfficeStation) => { const badge = officeStateBadge(station.state); return <button type="button" className="crew-row" key={station.name} onClick={(event) => { selectedTrigger.current = event.currentTarget; setSelectedName(station.name) }} aria-label={`Details for ${station.name}: ${officeStateLabel(station)}`}><PixelCharacter agent={station.id}/><span><strong>{station.name}</strong><small>{station.activity || station.role}</small></span><span className={`badge ${badge.tone}`}>{station.state}</span></button> }
+  const displayName = (station: OfficeStation) => nicknames[station.id] || station.name
+  const stationButton2d = (station: OfficeStation) => { const badge = officeStateBadge(station.state); const busy = ['Working', 'Reviewing', 'Collaborating'].includes(station.state); const name = displayName(station); return <button className={`pixel-station ${station.roomPosition} state-${station.state.toLowerCase()}`} key={station.id} onClick={(event) => { selectedTrigger.current = event.currentTarget; setSelectedId(station.id) }} aria-label={`${name}. ${officeStateLabel(station)}${station.activity ? `: ${station.activity}` : ''}. Open station details.`} title={station.activity || officeStateLabel(station)}>{busy && station.activity && <span className="speech" aria-hidden="true">{station.activity}</span>}<span className="pixel-station-name">{station.privacy === 'locked' ? '🔒 ' : ''}{name}</span><span className={`badge ${badge.tone}`}>{officeStateLabel(station)}</span>{station.state === 'Unknown' && <span className="neutral-label">NEUTRAL PRESENCE</span>}<AgentCharacterAvatar agent={station.id}/></button> }
+  const stationButton = (station: OfficeStation) => { const badge = officeStateBadge(station.state); const name = displayName(station); return <button type="button" className="crew-row" key={station.id} onClick={(event) => { selectedTrigger.current = event.currentTarget; setSelectedId(station.id) }} aria-label={`Details for ${name}: ${officeStateLabel(station)}`}><AgentCharacterAvatar agent={station.id}/><span><strong>{name}</strong><small>{station.activity || station.role}</small></span><span className={`badge ${badge.tone}`}>{station.state}</span></button> }
   return <section className={`office-stage view-${show3d ? '3d' : '2d'}`} aria-label="Visual Office">
     <div className="office-hud" role="list" aria-label="Key statistics">{hud.map((item) => { const body = <><span>{item.label}</span><b>{item.value}</b></>; return <div role="listitem" key={item.label}>{item.page && onNavigate ? <button type="button" className={`hud-chip${item.tone ? ` ${item.tone}` : ''}`} title={item.title ?? `Open ${item.page}`} onClick={() => onNavigate(item.page!)}>{body}</button> : <span className={`hud-chip${item.tone ? ` ${item.tone}` : ''}`} title={item.title}>{body}</span>}</div> })}</div>
     <div className="office-stage-tools">
@@ -200,7 +199,7 @@ export function Office({ dashboard, dashboardPending = false, onNavigate }: { da
       <button type="button" className={`panel-toggle${panel ? ' active' : ''}`} aria-expanded={Boolean(panel)} aria-controls="office-panel" onClick={() => choosePanel(panel ? undefined : 'Crew')}>◧ Panel</button>
     </div>
     <div className="office-canvas">
-      {show3d ? <SceneBoundary fallback={<section className="empty-state"><h2>3D view unavailable</h2><p>The 3D office could not start on this device. Switch back to 2D.</p></section>}><Suspense fallback={<LoadingState message="Loading the 3D office..."/>}><Office3D stations={office?.stations ?? []} onSelect={select3d}/></Suspense></SceneBoundary> : <>{view === '3d' && !webgl && <p className="muted office-note">3D needs WebGL, which this browser does not provide. Showing 2D.</p>}<div className="room-tabs" role="tablist" aria-label="Office rooms">{ROOMS.map((item) => <button role="tab" aria-selected={room === item} className={room === item ? 'active' : ''} onClick={() => setChosenRoom(item)} key={item}>{item} <span className="room-count">{counts[item]}</span></button>)}</div>
+      {show3d ? <SceneBoundary fallback={<section className="empty-state"><h2>3D view unavailable</h2><p>The 3D office could not start on this device. Switch back to 2D.</p></section>}><Suspense fallback={<LoadingState message="Loading the 3D office..."/>}><Office3D stations={(office?.stations ?? []).map((station) => ({ ...station, name: displayName(station) }))} onSelect={select3d}/></Suspense></SceneBoundary> : <>{view === '3d' && !webgl && <p className="muted office-note">3D needs WebGL, which this browser does not provide. Showing 2D.</p>}<div className="room-tabs" role="tablist" aria-label="Office rooms">{ROOMS.map((item) => <button role="tab" aria-selected={room === item} className={room === item ? 'active' : ''} onClick={() => setChosenRoom(item)} key={item}>{item} <span className="room-count">{counts[item]}</span></button>)}</div>
         <div className="room-scroll"><section className={`pixel-room flow ${room.toLowerCase()}`} aria-label={`${room} room`}><div className="room-label"><span>{room}</span><small>{room === 'Workspace' ? `${deskCount} HOT DESK${deskCount === 1 ? '' : 'S'} + MEETING TABLE` : 'QUIET BREAK AREA'}</small></div>
           {room === 'Workspace' ? <>
             <div className="flow-desks">{Array.from({ length: deskCount }, (_, index) => {
@@ -235,6 +234,6 @@ export function Office({ dashboard, dashboardPending = false, onNavigate }: { da
       </div>
     </aside>}
     {overlay && <OfficeOverlay kind={overlay} onClose={() => setOverlay(undefined)} onNavigate={onNavigate}/>}
-    {selected && <OfficeDetail station={selected} onClose={closeDetail}/>}
+    {selected && <OfficeDetail station={{ ...selected, name: displayName(selected) }} onClose={closeDetail}/>}
   </section>
 }

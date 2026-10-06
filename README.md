@@ -26,7 +26,7 @@ ruang                        # or: ruang --port 3005
 - **Update:** run the install command again.
 - **Remove:** add `--uninstall` (`... | bash -s -- --uninstall`).
 - **Other options:** `--version v0.2.0` installs a specific release; `--from-source` builds the latest `main` (needs `git`). See `install.sh --help`.
-- **On a server:** Ruang listens on `127.0.0.1` only. From your laptop, run `ssh -L 3001:127.0.0.1:3001 user@server`, then open http://127.0.0.1:3001.
+- **On a server:** Ruang listens on `0.0.0.0` (all network interfaces). From another device, open `http://<server-ip>:3001`. Expose it only on a trusted network; use an HTTPS tunnel or reverse proxy for remote access.
 
 Everything goes into `~/.local/share/ruang`, plus the `ruang` command in `~/.local/bin`. Installs made under the project's earlier names (`mission-control`, `majujaya`) are cleaned up automatically. No sudo is used and nothing is installed system-wide. Prefer to read the script before running it? `curl -fsSL https://raw.githubusercontent.com/yugienugraha/ruang/main/install.sh -o install.sh`, read it, then `bash install.sh`.
 
@@ -40,19 +40,19 @@ Requires Node.js 20+ and `hermes` on the `PATH` of the shell that starts the ser
 git clone https://github.com/yugienugraha/ruang.git
 cd ruang
 npm install
-npm run dev        # API on 127.0.0.1:3001 + Vite UI (open the URL Vite prints, usually http://localhost:5173)
+npm run dev        # API on 0.0.0.0:3001 + Vite UI (open the URL Vite prints, usually http://localhost:5173)
 ```
 
 Production from a checkout (single process, serves the built UI and the API):
 
 ```bash
 npm run build      # builds the UI into dist/ and the server into build/server/
-npm start          # open http://127.0.0.1:3001
+npm start          # open http://127.0.0.1:3001 locally, or http://<server-ip>:3001 from another device
 ```
 
 Checks: `npm run lint`, `npm test`, `npm run build`.
 
-**After pulling new code** run `npm install && npm run build` and restart `npm start` (a running `npm start` keeps serving the old API; `npm run dev` restarts the API by itself). The UI checks `/api/health` and shows a *Restart needed* banner when the server is older than the page. Set `RUANG_PORT` (or pass `--port`) to change the port. The server binds to `127.0.0.1` only. The older `MISSION_CONTROL_*` settings still work.
+**After pulling new code** run `npm install && npm run build` and restart `npm start` (a running `npm start` keeps serving the old API; `npm run dev` restarts the API by itself). The UI checks `/api/health` and shows a *Restart needed* banner when the server is older than the page. Set `RUANG_PORT` (or pass `--port`) to change the port. The server binds to `0.0.0.0` (all network interfaces). The older `MISSION_CONTROL_*` settings still work.
 
 **Releasing:** bump the version and push the tag, for example `npm version 0.2.1 && git push origin main --follow-tags`. The *Release* workflow then lints, tests, builds and attaches `ruang.tgz` to a GitHub release, which the installer picks up. To also publish to npm, add an `NPM_TOKEN` repository secret.
 
@@ -124,7 +124,7 @@ How it is protected:
 - A damaged `access.json` keeps Ruang locked rather than open; `ruang access-code off` clears it.
 - This is Ruang's only write, and it touches Ruang's own config, never Hermes.
 
-Ruang listens on `127.0.0.1`, so the code matters when you reach it from other devices, for example through an SSH tunnel, Tailscale or a reverse proxy. Over plain HTTP the code crosses the network unencrypted; use an HTTPS tunnel or Tailscale for that.
+Ruang listens on `0.0.0.0`, so it can be reached through any network interface allowed by the host firewall. Use an HTTPS tunnel, Tailscale or a reverse proxy for remote access; over plain HTTP the access code crosses the network unencrypted.
 
 ## Profile lock
 

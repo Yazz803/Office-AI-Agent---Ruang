@@ -1,11 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatTime } from '../format.ts'
 import { usePolling } from '../polling.ts'
-import type { CommandLogSnapshot, LogLevel, LogsSnapshot } from '../types.ts'
-import { EmptyState, LoadingState, PageTitle, SearchInput, SourceStatus } from '../ui.tsx'
+import type { CommandLogEntry, CommandLogSnapshot, LogLevel, LogsSnapshot } from '../types.ts'
+import { Dialog, EmptyState, LoadingState, PageTitle, SearchInput, SourceStatus } from '../ui.tsx'
 
 const LEVELS: ('ALL' | LogLevel)[] = ['ALL', 'ERROR', 'WARNING', 'INFO', 'DEBUG']
 const MISSION_CONTROL = 'mission-control'
+
+export function CommandAuditDetail({ entry, onClose }: { entry: CommandLogEntry; onClose: () => void }) {
+  return <Dialog labelledBy="command-audit-title" onClose={onClose} closeLabel="Close command audit details" className="command-audit-dialog">
+    <p className="eyebrow">COMMAND AUDIT</p><h2 id="command-audit-title">Log details</h2>
+    <dl className="command-audit-details">
+      <dt>Time</dt><dd>{formatTime(entry.at)}</dd>
+      <dt>Command</dt><dd><code>{entry.command}</code></dd>
+      <dt>Result</dt><dd><span className={`badge ${entry.ok ? 'good' : 'bad'}`}>{entry.ok ? 'ok' : entry.error ?? 'failed'}</span></dd>
+      <dt>Duration</dt><dd>{entry.durationMs} ms</dd>
+      {entry.error && <><dt>Error</dt><dd><pre>{entry.error}</pre></dd></>}
+    </dl>
+  </Dialog>
+}
 
 export function Logs() {
   const [follow, setFollow] = useState(true)
@@ -14,6 +27,7 @@ export function Logs() {
   const [tab, setTab] = useState('agent')
   const [level, setLevel] = useState<'ALL' | LogLevel>('ALL')
   const [query, setQuery] = useState('')
+  const [selectedCommand, setSelectedCommand] = useState<CommandLogEntry | null>(null)
   const viewer = useRef<HTMLPreElement>(null)
   const data = logs.status === 'ready' ? logs.data : undefined
   const file = data?.files.find((item) => item.name === tab)
@@ -31,7 +45,8 @@ export function Logs() {
     <div className="room-tabs log-tabs" role="tablist" aria-label="Log files">{tabs.map((item) => <button key={item.name} role="tab" aria-selected={tab === item.name} className={tab === item.name ? 'active' : ''} onClick={() => setTab(item.name)}>{item.label}{item.count > 0 && <span className="room-count error-count">{item.count}</span>}</button>)}</div>
     {tab === MISSION_CONTROL ? (commands.status === 'pending' ? <LoadingState message="Reading command audit..."/> : !commandData ? <EmptyState title="Not Available">The Ruang API could not be reached.</EmptyState> : <>
       <p className="card-note">{commandData.health.total} reads recorded · {commandData.health.failed} failed · {commandData.health.averageMs} ms average. Only fixed, read-only commands are ever executed.</p>
-      {commandData.entries.length === 0 ? <EmptyState title="No reads yet">Commands appear here as pages load data.</EmptyState> : <table className="log-table"><thead><tr><th>Time</th><th>Command</th><th>Result</th><th>Duration</th></tr></thead><tbody>{commandData.entries.map((entry, index) => <tr key={`${entry.at}-${index}`}><td>{formatTime(entry.at)}</td><td><code>{entry.command}</code></td><td>{entry.ok ? <span className="badge good">ok</span> : <span className="badge bad" title={entry.error}>{entry.error ?? 'failed'}</span>}</td><td>{entry.durationMs} ms</td></tr>)}</tbody></table>}
+      {commandData.entries.length === 0 ? <EmptyState title="No reads yet">Commands appear here as pages load data.</EmptyState> : <table className="log-table"><thead><tr><th>Time</th><th>Command</th><th>Result</th><th>Duration</th></tr></thead><tbody>{commandData.entries.map((entry, index) => <tr key={`${entry.at}-${index}`} className="command-audit-row" tabIndex={0} onClick={() => setSelectedCommand(entry)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedCommand(entry) } }} aria-label={`View command audit details: ${entry.command}`}><td>{formatTime(entry.at)}</td><td><code>{entry.command}</code></td><td>{entry.ok ? <span className="badge good">ok</span> : <span className="badge bad" title={entry.error}>{entry.error ?? 'failed'}</span>}</td><td>{entry.durationMs} ms</td></tr>)}</tbody></table>}
+      {selectedCommand && <CommandAuditDetail entry={selectedCommand} onClose={() => setSelectedCommand(null)}/>}
     </>) : logs.status === 'pending' ? <LoadingState message="Reading Hermes logs..."/> : !file ? <EmptyState title="Not Available">The Ruang API could not be reached.</EmptyState> : file.source.availability === 'unavailable' ? <EmptyState title="Not Available">{file.source.error?.message ?? 'hermes logs could not be read.'}</EmptyState> : <>
       <div className="toolbar"><SearchInput value={query} onChange={setQuery} label="Filter log lines"/><label className="select-label">Level <select value={level} onChange={(event) => setLevel(event.target.value as 'ALL' | LogLevel)}>{LEVELS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="check-label"><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)}/> Follow (5s)</label><span className="toolbar-count">{lines.length} of {file.source.data.length} lines</span></div>
       {file.source.data.length === 0 ? <EmptyState title="Log is empty">Hermes has not written to the {file.label.toLowerCase()} log yet.</EmptyState> : <pre className="log-viewer" ref={viewer} tabIndex={0} aria-label={`${file.label} log`}>{lines.map((line, index) => <span key={index} className={`log-line level-${line.level.toLowerCase()}`}>{line.text}{'\n'}</span>)}</pre>}

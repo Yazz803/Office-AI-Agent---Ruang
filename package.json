@@ -24,7 +24,7 @@
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.build.json",
-    "start": "node bin/ruang.js",
+    "start": "node bin/ruang.js -p 4121",
     "lint": "eslint .",
     "test": "vitest run"
   },

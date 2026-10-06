@@ -4,6 +4,13 @@ import { OfficeDetail } from './pages/Office.tsx'
 import type { OfficeStation } from './types.ts'
 
 describe('OfficeDetail', () => {
+  it('renders a supplied nickname as the station display name', () => {
+    const station = { id: 'coder', name: 'Scribe', role: 'Hermes profile', room: 'Workspace', roomPosition: 'assigned-desk', state: 'Working', currentTask: '—', recentActivity: '—', activity: '', seat: 1, provenance: '', freshness: '' } as OfficeStation
+    const markup = renderToStaticMarkup(<OfficeDetail station={station} onClose={vi.fn()}/>)
+    expect(markup).toContain('<h2 id="office-detail-title">Scribe</h2>')
+    expect(markup).toContain('Close Scribe details')
+  })
+
   it('renders a labelled in-page dialog with station metadata, evidence, and a close control', () => {
     const station: OfficeStation = {
       id: 'coder', name: 'coder', role: 'Hermes profile', room: 'Workspace', roomPosition: 'review-desk',
